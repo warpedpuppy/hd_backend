@@ -1,13 +1,16 @@
-const express = require('express');
 require('dotenv').config();
 
+const express = require('express');
 const app = express();
 app.use(express.json());
 const morgan = require('morgan');
 const mongoose = require('mongoose');
+const config = require('./config');
 
-const database = process.env.CONNECTION_URI || 'mongodb://localhost:27017/MMM';
-mongoose.connect(database, { useNewUrlParser: true, useUnifiedTopology: true });
+const { CONNECTION_URI } = config;
+
+mongoose.connect(CONNECTION_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+
 const cors = require('cors');
 
 app.use(morgan('common'));
@@ -15,11 +18,12 @@ app.use(morgan('common'));
 const { check, validationResult } = require('express-validator');
 const passport = require('passport');
 const Models = require('./models');
+const MoviesRouter = require('./movies/movies-router');
 require('./passport');
 /* eslint-disable-next-line */
 const auth = require('./auth')(app);
 
-const Movies = Models.Movie;
+// const Movies = Models.Movie;
 const Genres = Models.Genre;
 const Directors = Models.Director;
 const Users = Models.User;
@@ -27,6 +31,8 @@ const Users = Models.User;
 // Trusted domain
 // Allow all domains
 app.use(cors());
+
+app.use('/movies', MoviesRouter)
 
 // Limit allowed domains
 /*
@@ -64,65 +70,7 @@ app.get('/documentation', (req, res) => {
 // MOVIES SECTION
 
 // Get all movies, movies by genreID or/and actor
-app.get('/movies', passport.authenticate('jwt', { session: false }), async (req, res) => {
-  const genreQuery = req.query.genre;
-  const actorQuery = req.query.actor;
-  if (genreQuery && actorQuery) {
-    try {
-      const movies = await Movies.find({ genre: genreQuery, actors: actorQuery }).populate('genre', 'name').populate('director', 'name');
-      if (movies.length === 0) {
-        res.status(404).send(`Found no movie with genre ${genreQuery} starring ${actorQuery}.`);
-      } else {
-        res.status(200).json(movies);
-      }
-    } catch (error) {
-      res.status(500).send(`Error: ${error}`);
-    }
-  } else if (actorQuery) {
-    try {
-      const movies = await Movies.find({ actors: actorQuery }).populate('genre', 'name').populate('directors', 'name');
-      if (movies.length === 0) {
-        res.status(404).send(`Found no movie starring ${actorQuery}.`);
-      } else {
-        res.status(201).json(movies);
-      }
-    } catch (error) {
-      res.status(500).send(`Error: ${error}`);
-    }
-  } else if (genreQuery) {
-    try {
-      const movies = await Movies.find({ genre: genreQuery }).populate('genre', 'name').populate('director', 'name');
-      if (movies.length === 0) {
-        res.status(404).send(`Found no movie with genre ${genreQuery}.`);
-      } else {
-        res.status(200).json(movies);
-      }
-    } catch (error) {
-      res.status(500).send(`Error: ${error}`);
-    }
-  } else {
-    try {
-      const movies = await Movies.find({}).populate('genre', 'name').populate('director', 'name');
-      res.status(200).json(movies);
-    } catch (error) {
-      res.status(500).send(`Error: ${error}`);
-    }
-  }
-});
 
-// Get movie by title
-app.get('/movies/:title', passport.authenticate('jwt', { session: false }), async (req, res) => {
-  try {
-    const movie = await Movies.find({ title: req.params.title }).populate('genre', 'name').populate('director', 'name');
-    if (movie.length === 0) {
-      res.status(404).send(`There is no movie entitled ${req.params.title}`);
-    } else {
-      res.status(200).json(movie);
-    }
-  } catch (error) {
-    res.status(500).send(`Error: ${error}`);
-  }
-});
 
 // GENRES SECTION
 
@@ -215,7 +163,7 @@ app.post('/users', [
           email: req.body.email,
           birth_date: req.body.birth_date,
         })
-        .then((newUser) => { res.status(201).send(`You are now registered as:<br>${JSON.stringify(newUser)}`); })
+        .then((newUser) => { res.status(201).send(`You are now registered as:<br>${JSON.stringify(Users.serialize(newUser))}`); })
         .catch((error) => res.status(500).send(`Error: ${error}`));
     }
   } catch (error) {
@@ -276,14 +224,24 @@ app.put('/users/:_id', [
     return res.status(422).json(errors.array());
   }
   try {
+    const hashedPassword = Users.hashPassword(req.body.password);
+    let updateObject = {};
+
+    if (req.body.user_name) {
+      updateObject.user_name = req.body.user_name
+    }
+    if (req.body.password) {
+      updateObject.password = hashedPassword
+    }
+    if (req.body.email) {
+      updateObject.email = req.body.email
+    }
+    if (req.body.birth_date) {
+      updateObject.birth_date = req.body.birth_date
+    }
+
     const updatedUser = await Users.findOneAndUpdate({ _id: req.params._id }, {
-      $set:
-      {
-        user_name: req.body.user_name,
-        password: req.body.password,
-        email: req.body.email,
-        birth_date: req.body.birth_date,
-      },
+      $set: updateObject,
     },
     { new: true });
     if (updatedUser) {
